@@ -290,19 +290,19 @@ def run_trade_simulation(picks_df, stop_loss_pct, target_profit_pct, horizon_day
             
         try:
             unique_yf_symbols = list(set(yf_symbols))
-            data = yf.download(unique_yf_symbols, start=start_date_str, progress=False)
+            data = yf.download(unique_yf_symbols, start=start_date_str, group_by='ticker', progress=False)
             
             for yf_sym in unique_yf_symbols:
                 orig_sym = sym_map[yf_sym]
                 symbol_prices[orig_sym] = []
                 
-                if len(unique_yf_symbols) == 1:
-                    df_sym = data
-                else:
+                if isinstance(data.columns, pd.MultiIndex):
                     if yf_sym in data.columns.get_level_values(0):
                         df_sym = data[yf_sym]
                     else:
                         continue
+                else:
+                    df_sym = data
                         
                 if 'Close' not in df_sym.columns:
                     continue
