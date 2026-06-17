@@ -1,0 +1,180 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\geometry{a4paper, margin=1in}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{titlesec}
+
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstdefinestyle{mystyle}{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+\lstset{style=mystyle}
+
+\title{Comprehensive Architecture Manual: Nifty 500 Quantitative Analysis Engine}
+\author{Shubham Chaurasia}
+\date{May 2026}
+
+\begin{document}
+
+\maketitle
+\tableofcontents
+\newpage
+
+\section{Introduction}
+\subsection{Purpose}
+The purpose of the Nifty 500 Quantitative Analysis Engine is to provide a robust, systematic, and explainable framework for stock selection. In the volatile Indian equity market, purely fundamental or purely technical approaches often fail to capture the full picture. This engine bridge the gap by integrating high-quality fundamental metrics, momentum-based technical trends, and forward-looking statistical simulations.
+
+\subsection{Approach}
+The engine utilizes a "Waterfall Filtering" approach:
+\begin{enumerate}
+    \item \textbf{Data Aggregation}: Consolidating high-latency fundamental data with low-latency price action data.
+    \item \textbf{Layered Scoring}: Evaluating stocks through three independent but weighted lenses.
+    \item \textbf{Explainable Output}: Providing the reasoning behind every decision to ensure "Black Box" algorithms are avoided.
+\end{enumerate}
+
+\section{Logical Architecture}
+The system is divided into four major components:
+\begin{itemize}
+    \item \textbf{Data Ingestion Layer}: Managed by \texttt{DataManager} and \texttt{DataFetcher}.
+    \item \textbf{Computation Engine}: Managed by \texttt{FeatureEngine} and \texttt{StatModel}.
+    \item \textbf{Decision Engine}: Managed by \texttt{ScoringEngine}.
+    \item \textbf{Output Layer}: Managed by \texttt{ExcelWriter} and \texttt{engine.py}.
+\end{itemize}
+
+\section{Algorithm Deep Dive}
+
+\subsection{Layer 1: Fundamental Health and Valuation}
+\textbf{Goal}: Identify companies with robust balance sheets and reasonable prices.
+\subsubsection{Metrics and Definitions}
+\begin{enumerate}
+    \item \textbf{Growth (Revenue/EPS)}: Measures the year-over-year expansion of the company. A company growing at $>15\%$ is considered "High Growth."
+    \item \textbf{Return on Equity (ROE)}: A measure of financial performance calculated by dividing net income by shareholders' equity. High ROE indicates efficient usage of shareholder capital.
+    \item \textbf{Debt-to-Equity (D/E)}: Measures financial leverage. A ratio $<1.0$ is generally preferred to avoid insolvency risks.
+    \item \textbf{P/E and P/B Ratios}: Valuation multiples that compare price to earnings and book value. Stocks with lower multiples relative to their growth are rewarded.
+\end{enumerate}
+
+\subsubsection{Math Formulation}
+The Fundamental Score ($S_{F}$) is calculated as:
+\begin{equation}
+S_{F} = 0.7 \times (S_{growth} + S_{roe} + S_{leverage}) + 0.3 \times S_{valuation}
+\end{equation}
+
+\subsection{Layer 2: Technical Trend and Price Action}
+\textbf{Goal}: Identify stocks currently in a momentum phase with favorable entry points.
+\subsubsection{Technical Indicators}
+\begin{itemize}
+    \item \textbf{SMA (20, 50, 200)}: 
+    \begin{equation}
+    SMA_{n} = \frac{1}{n} \sum_{i=1}^{n} P_{t-i}
+    \end{equation}
+    A "Golden Cross" or Bullish Alignment is defined as $Price > SMA_{50} > SMA_{200}$.
+    \item \textbf{RSI (Relative Strength Index)}: Measures the speed and change of price movements. 
+    \begin{equation}
+    RSI = 100 - \left[ \frac{100}{1 + \frac{AvgGain}{AvgLoss}} \right]
+    \end{equation}
+    We target an RSI between 40 and 70 to avoid overextended (overbought) or crashing (oversold) phases.
+    \item \textbf{ATR (Average True Range)}: Measures volatility. We use ATR Percentage to adjust for different price scales.
+\end{itemize}
+
+\subsubsection{Price Action Detection}
+\begin{itemize}
+    \item \textbf{Breakout Detection}: Triggers if current close is at a 20-day high with Volume $> 1.5 \times$ Average Volume.
+    \item \textbf{Pullback Detection}: Triggers if price dips below 20-day SMA while remaining above 50-day SMA in a primary uptrend.
+\end{itemize}
+
+\subsection{Layer 3: Statistical Edge}
+\textbf{Goal}: Quantify the probability of success using simulation and predictive modeling.
+\subsubsection{Monte Carlo Simulation}
+The simulation generates 5,000 potential price paths using Geometric Brownian Motion (GBM):
+\begin{equation}
+dS_t = \mu S_t dt + \sigma S_t dW_t
+\end{equation}
+Where $\mu$ is historical mean return and $\sigma$ is historical volatility. We calculate the probability $P(S_{target})$ of hitting a $+10\%$ target before a $-5\%$ stop-loss.
+
+\subsubsection{Ridge Regression Model}
+A machine learning approach to predict the 10-day forward return ($R_{10}$):
+\begin{equation}
+R_{10} = \beta_0 + \beta_1 X_{slope} + \beta_2 X_{strength} + \beta_{rsi} X_{rsi} + \dots + \alpha \sum \beta_{i}^2
+\end{equation}
+The Ridge penalty ($\alpha$) prevents overfitting by shrinking coefficients of less relevant features.
+
+\section{Confidence Analysis}
+\textbf{Definition}: The Confidence Score measures the level of \textit{Confluence} between the three layers.
+If $S_{L1} \approx S_{L2} \approx S_{L3}$, confidence is maximized. If they diverge, the signal is considered less reliable.
+\begin{equation}
+Confidence = \left( 1 - \frac{\sigma(S_{L1}, S_{L2}, S_{L3})}{100} \right) \times \frac{Score}{100}
+\end{equation}
+
+\section{Implementation and Optimization}
+\subsection{Database Integration (MySQL)}
+Standard analytical systems use flat files (CSV), which become unsustainable at scale. This engine uses a MySQL 8.0 backend:
+\begin{itemize}
+    \item \textbf{Tables}: \texttt{price\_data} (High-freq OHLCV) and \texttt{fundamentals} (Company metrics).
+    \item \textbf{Optimization}: Indices on \texttt{(symbol, date)} allow sub-millisecond lookups.
+    \item \textbf{Batch Operations}: 500 stocks imply $\sim$125,000 daily data points. We use \texttt{executemany} for 0.5s write operations.
+\end{itemize}
+
+\subsection{Parallel Execution}
+To process 500 stocks within minutes, we implement a multi-threaded architecture using \texttt{ThreadPoolExecutor}. This allows I/O blocking (Price fetching and DB writes) to happen concurrently with CPU-heavy simulations.
+
+\section{Interpretation Guide}
+\begin{itemize}
+    \item \textbf{Action: BUY}: Indicates strong fundamental health, a confirmed bullish trend, and a positive statistical expectation.
+    \item \textbf{High Score, Low Confidence}: A stock might have great fundamentals but poor current timing. Consider adding it to a watchlist rather than immediate buying.
+    \item \textbf{Layer 3 (Statistical) Lead}: If Layer 3 is much higher than others, the stock might be entering a speculative breakout phase. High reward potential but higher risk.
+\end{itemize}
+
+\section{Pros, Cons, and Future Scope}
+\subsection{Pros}
+\begin{itemize}
+    \item \textbf{Explainability}: Every recommendation points to a specific layer and reasoning string.
+    \item \textbf{Scalability}: Ready for Nifty 1000 or global universes.
+    \item \textbf{Resilience}: MySQL integration prevents data corruption and allows multi-user access.
+\end{itemize}
+
+\subsection{Cons}
+\begin{itemize}
+    \item \textbf{Data Lag}: Fundamental data from yfinance is sometimes delayed compared to official exchange filings.
+    \item \textbf{Stat Model Blindness}: Monte Carlo assumes historical volatility reflects future volatility (cannot predict "Black Swan" events).
+\end{itemize}
+
+\subsection{Future Scopes}
+\begin{itemize}
+    \item \textbf{Sentiment Analysis}: Integrating Twitter and News headlines using LLMs.
+    \item \textbf{Portfolio Optimization}: Adding Markowitz Efficient Frontier to suggest weights for the "Top Picks."
+    \item \textbf{Real-time Dashboards}: Replacing Excel with a React/Streamlit web dashboard.
+\end{itemize}
+
+\section{Conclusion}
+This Nifty 500 Quantitative Analysis Engine provides a institutional-grade framework for individual traders and fund managers. By balancing the rigor of fundamental value with the precision of technical timing and statistical probability, it offers an unfair advantage in the pursuit of alpha.
+
+\end{document}

@@ -1,0 +1,24 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python compiled files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Local sqlite caches & system logs
+logs/
+*.log
+data/*.db
+
+# Scratch and temp files
+scratch/
+
+# OS/IDE settings
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

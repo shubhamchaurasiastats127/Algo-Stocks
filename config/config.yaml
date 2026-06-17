@@ -1,0 +1,50 @@
+double_bottom:
+  lookback_days: 150
+  max_diff_pct: 0.05
+  min_bounce_pct: 0.02
+  min_peak_bounce_pct: 0.07
+explainability:
+  confidence_threshold: 0.6
+  enable_reason_codes: true
+mysql:
+  database: algo_stocks
+  host: 127.0.0.1
+  password: mysql1234
+  port: 3306
+  user: root
+optimization:
+  batch_size: 20
+  parallel_workers: 8
+paths:
+  cache_db: data/stock_cache.db
+  logs: logs/engine.log
+  master_csv: data/master_data.csv
+  output_folder: output/
+regression:
+  lookback_days: 252
+  prediction_horizon: 10
+simulation:
+  horizon_days: 5
+  iterations: 5000
+  stop_pct: 0.025
+  target_pct: 0.1
+thresholds:
+  avoid: 40
+  buy: 70
+  sell: 30
+  stop_loss_pct: 0.05
+  target_profit_pct: 0.25
+  wait: 50
+universe:
+  index: Nifty 500
+  min_market_cap_cr: 100
+  min_price: 10
+  min_volume_20d_avg: 4000
+  nifty_500_csv_url: https://archives.nseindia.com/content/indices/ind_nifty500list.csv
+weights:
+  fundamentals: 0.3
+  price_action: 0.2
+  risk_regime: 0.1
+  stat_edge: 0.25
+  technical_trend: 0.1
+  valuation: 0.05

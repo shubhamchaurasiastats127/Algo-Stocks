@@ -1,0 +1,11 @@
+pandas
+yfinance
+pyyaml
+mysql-connector-python
+openpyxl
+numpy
+scipy
+streamlit
+plotly
+scikit-learn
+xlsxwriter
