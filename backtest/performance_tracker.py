@@ -49,9 +49,18 @@ def load_all_stock_prices(config: dict, symbols: list, start_date, end_date) -> 
     """Pre-load all closing prices for symbols in a single query to optimize performance."""
     if not symbols:
         return {}
-    # pyrefly: ignore [missing-import]
-    import mysql.connector
-    conn = mysql.connector.connect(**config['mysql'])
+    
+    conn = None
+    try:
+        import mysql.connector
+        conn = mysql.connector.connect(**config['mysql'])
+    except Exception as db_err:
+        import sqlite3
+        from data_manager import SQLiteConnectionWrapper
+        sqlite_path = "data/stock_cache.db"
+        os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+        conn = SQLiteConnectionWrapper(sqlite3.connect(sqlite_path))
+        
     placeholders = ",".join(["%s"] * len(symbols))
     query = f"""
         SELECT symbol, date, close 

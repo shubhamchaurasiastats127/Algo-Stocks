@@ -217,7 +217,14 @@ class SectorSelector:
     # ------------------------------------------------------------------
 
     def _get_conn(self):
-        return mysql.connector.connect(**self.db_config)
+        try:
+            return mysql.connector.connect(**self.db_config)
+        except Exception as e:
+            import sqlite3
+            from data_manager import SQLiteConnectionWrapper
+            sqlite_path = "data/stock_cache.db"
+            os.makedirs(os.path.dirname(sqlite_path), exist_ok=True)
+            return SQLiteConnectionWrapper(sqlite3.connect(sqlite_path))
 
     def _get_constituents(self, index_name: str) -> list:
         conn = self._get_conn()
