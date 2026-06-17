@@ -13,15 +13,88 @@ import time
 from datetime import datetime, timedelta
 import json
 import logging
+import sqlite3
+
+class SQLiteCursorWrapper:
+    def __init__(self, cursor):
+        self.cursor = cursor
+        
+    def execute(self, query, params=None):
+        query = query.replace('%s', '?')
+        if "ON DUPLICATE KEY UPDATE" in query or "on duplicate key update" in query:
+            if "fundamentals" in query:
+                query = "INSERT OR REPLACE INTO fundamentals (symbol, last_updated, data_json) VALUES (?, ?, ?)"
+                if params is not None:
+                    params = params[:3]
+            elif "price_data" in query:
+                query = "INSERT OR REPLACE INTO price_data (symbol, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            elif "indices" in query:
+                query = "INSERT OR REPLACE INTO indices (index_name, csv_url) VALUES (?, ?)"
+        
+        if params is None:
+            return self.cursor.execute(query)
+        return self.cursor.execute(query, params)
+        
+    def executemany(self, query, params_list=None):
+        query = query.replace('%s', '?')
+        if "ON DUPLICATE KEY UPDATE" in query or "on duplicate key update" in query:
+            if "price_data" in query:
+                query = "INSERT OR REPLACE INTO price_data (symbol, date, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)"
+        if params_list is None:
+            return self.cursor.executemany(query)
+        return self.cursor.executemany(query, params_list)
+        
+    def __getattr__(self, name):
+        return getattr(self.cursor, name)
+
+class SQLiteConnectionWrapper:
+    def __init__(self, conn):
+        self.conn = conn
+        
+    def cursor(self):
+        return SQLiteCursorWrapper(self.conn.cursor())
+        
+    def commit(self):
+        self.conn.commit()
+        
+    def rollback(self):
+        self.conn.rollback()
+        
+    def close(self):
+        self.conn.close()
+        
+    def __getattr__(self, name):
+        return getattr(self.conn, name)
+
+class SQLitePoolMock:
+    def __init__(self, manager):
+        self.manager = manager
+        
+    def get_connection(self):
+        return self.manager.get_connection()
 
 class CacheManager:
     def __init__(self, db_config):
         self.db_config = db_config
-        self._init_pool()
+        self.use_sqlite = False
+        self.sqlite_path = "data/stock_cache.db"
+        
+        # Ensure data directory exists
+        os.makedirs(os.path.dirname(self.sqlite_path), exist_ok=True)
+        
+        try:
+            self._init_pool()
+            # Test MySQL connection
+            conn = self.pool.get_connection()
+            conn.close()
+        except Exception as e:
+            self.use_sqlite = True
+            self.pool = SQLitePoolMock(self)
+            logging.info(f"Local MySQL connection failed ({e}). Falling back to SQLite cache database: {self.sqlite_path}")
+            
         self.init_tables()
 
     def _init_pool(self):
-        # Use a connection pool for efficiency
         self.pool = pooling.MySQLConnectionPool(
             pool_name="algo_pool",
             pool_size=10,
@@ -29,29 +102,69 @@ class CacheManager:
             **self.db_config
         )
 
+    def get_connection(self):
+        if self.use_sqlite:
+            return SQLiteConnectionWrapper(sqlite3.connect(self.sqlite_path))
+        return self.pool.get_connection()
+
     def init_tables(self):
-        conn = self.pool.get_connection()
+        conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            # Create indices table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS indices (
-                    index_name VARCHAR(100) PRIMARY KEY,
-                    csv_url VARCHAR(255) NOT NULL,
-                    last_updated DATETIME
-                ) ENGINE=InnoDB;
-            """)
-            
-            # Create index_constituents table
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS index_constituents (
-                    index_name VARCHAR(100),
-                    symbol VARCHAR(20),
-                    PRIMARY KEY (index_name, symbol),
-                    FOREIGN KEY (index_name) REFERENCES indices(index_name) ON DELETE CASCADE,
-                    INDEX idx_symbol (symbol)
-                ) ENGINE=InnoDB;
-            """)
+            if self.use_sqlite:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS indices (
+                        index_name TEXT PRIMARY KEY,
+                        csv_url TEXT NOT NULL,
+                        last_updated TEXT
+                    );
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS index_constituents (
+                        index_name TEXT,
+                        symbol TEXT,
+                        PRIMARY KEY (index_name, symbol)
+                    );
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS price_data (
+                        symbol TEXT,
+                        date TEXT,
+                        open REAL,
+                        high REAL,
+                        low REAL,
+                        close REAL,
+                        volume INTEGER,
+                        PRIMARY KEY (symbol, date)
+                    );
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS fundamentals (
+                        symbol TEXT PRIMARY KEY,
+                        last_updated TEXT,
+                        data_json TEXT
+                    );
+                """)
+            else:
+                # Create indices table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS indices (
+                        index_name VARCHAR(100) PRIMARY KEY,
+                        csv_url VARCHAR(255) NOT NULL,
+                        last_updated DATETIME
+                    ) ENGINE=InnoDB;
+                """)
+                
+                # Create index_constituents table
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS index_constituents (
+                        index_name VARCHAR(100),
+                        symbol VARCHAR(20),
+                        PRIMARY KEY (index_name, symbol),
+                        FOREIGN KEY (index_name) REFERENCES indices(index_name) ON DELETE CASCADE,
+                        INDEX idx_symbol (symbol)
+                    ) ENGINE=InnoDB;
+                """)
             conn.commit()
             
             # Pre-populate indices table
@@ -73,7 +186,7 @@ class CacheManager:
                 "Nifty Metal": "https://archives.nseindia.com/content/indices/ind_niftymetallist.csv",
                 "Nifty Realty": "https://archives.nseindia.com/content/indices/ind_niftyrealtylist.csv",
                 "Nifty Energy": "https://archives.nseindia.com/content/indices/ind_niftyenergylist.csv",
-                "Nifty Infra": "https://archives.nseindia.com/content/indices/ind_niftyinfralist.csv",
+                "Nifty Infra": "https://archives.nseindigo.com/content/indices/ind_niftyinfralist.csv",
                 "Nifty Financial Services": "https://archives.nseindia.com/content/indices/ind_niftyfinancelist.csv",
                 "Nifty Private Bank": "https://archives.nseindia.com/content/indices/ind_nifty_privatebanklist.csv",
                 "Nifty PSU Bank": "https://archives.nseindia.com/content/indices/ind_niftypsubanklist.csv"
@@ -178,7 +291,11 @@ class CacheManager:
         try:
             cursor.execute("SELECT max(date) FROM price_data WHERE symbol = %s", (symbol,))
             res = cursor.fetchone()[0]
-            return res.strftime('%Y-%m-%d') if res else None
+            if not res:
+                return None
+            if isinstance(res, str):
+                return res
+            return res.strftime('%Y-%m-%d')
         finally:
             cursor.close()
             conn.close()
@@ -205,9 +322,18 @@ class DataFetcher:
             # 2. Check if constituents need refresh (either not fetched yet or older than 7 days)
             needs_refresh = True
             if last_updated:
-                age = datetime.now() - last_updated
-                if age.days < 7:
-                    needs_refresh = False
+                if isinstance(last_updated, str):
+                    try:
+                        last_updated = datetime.strptime(last_updated, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        try:
+                            last_updated = datetime.strptime(last_updated, '%Y-%m-%d')
+                        except ValueError:
+                            last_updated = None
+                if last_updated:
+                    age = datetime.now() - last_updated
+                    if age.days < 7:
+                        needs_refresh = False
             
             if needs_refresh:
                 logging.info(f"Refreshing constituents for {index_name} from {csv_url}...")
