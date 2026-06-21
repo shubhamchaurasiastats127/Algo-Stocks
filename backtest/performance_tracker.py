@@ -83,29 +83,14 @@ def load_all_stock_prices(config: dict, symbols: list, start_date, end_date) -> 
         data[sym][d] = float(close)
     return data
 
-def get_monthly_dates(start_date, today_date) -> list:
-    """Generate same-day-of-month dates at monthly intervals from start_date to today_date."""
-    dates = []
-    curr = start_date
-    while True:
-        month = curr.month + 1
-        year = curr.year
-        if month > 12:
-            month = 1
-            year += 1
-        day = min(start_date.day, 28)  # Safe day mapping (using 7th is always safe)
-        next_curr = datetime(year, month, day).date()
-        if next_curr > today_date:
-            break
-        dates.append(next_curr)
-        curr = next_curr
-    if not dates or dates[-1] < today_date:
-        # If today_date is not in the list, append it as the final checkpoint
-        if dates and (today_date - dates[-1]).days < 10:
-            pass  # Avoid duplicated final month if very close
-        else:
-            dates.append(today_date)
-    return dates
+def get_weekly_dates(start_date, today_date) -> list:
+    """Generate 1W, 2W, 3W, 4W dates from start_date."""
+    return [
+        start_date + timedelta(days=7),
+        start_date + timedelta(days=14),
+        start_date + timedelta(days=21),
+        start_date + timedelta(days=28)
+    ]
 
 def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_picks=10, today_date=None):
     config_path = os.path.join(os.path.dirname(__file__), '../config/config.yaml')
@@ -192,7 +177,7 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
             continue
             
         df_picks = all_picks[r_date]
-        m_dates = get_monthly_dates(r_date, today_date)
+        m_dates = get_weekly_dates(r_date, today_date)
         
         # We track two portfolios: Full Rebound Picks and Top N Rebound Picks by Final_Rank_Score
         df_top10 = df_picks.sort_values('Final_Rank_Score', ascending=False).head(top_n_picks)
@@ -226,8 +211,11 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
             
             # Get prices and returns at monthly checkpoints
             for m_idx, m_dt in enumerate(m_dates, 1):
-                direction = 'before' if m_dt == today_date else 'after'
-                p, dt = find_closest_date_price(sym_prices, m_dt, direction=direction)
+                # If checkpoint date is in the future relative to today_date, cap at today_date (latest possible)
+                eval_dt = today_date if m_dt > today_date else m_dt
+                direction = 'before' if (eval_dt == today_date or m_dt > today_date) else 'after'
+                
+                p, dt = find_closest_date_price(sym_prices, eval_dt, direction=direction)
                 stock_data['Prices'][f'M{m_idx}'] = p
                 stock_data['Prices'][f'M{m_idx}_Date'] = dt
                 
@@ -252,15 +240,17 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
         benchmarks['Nifty 500']['entry_price'] = n500_entry
         
         for m_idx, m_dt in enumerate(m_dates, 1):
-            direction = 'before' if m_dt == today_date else 'after'
-            n50_p, _ = find_closest_date_price(nifty50_prices, m_dt, direction=direction)
+            eval_dt = today_date if m_dt > today_date else m_dt
+            direction = 'before' if (eval_dt == today_date or m_dt > today_date) else 'after'
+            
+            n50_p, _ = find_closest_date_price(nifty50_prices, eval_dt, direction=direction)
             benchmarks['Nifty 50']['prices'][f'M{m_idx}'] = n50_p
             if n50_p and n50_entry:
                 benchmarks['Nifty 50']['returns'][f'M{m_idx}'] = (n50_p - n50_entry) / n50_entry
             else:
                 benchmarks['Nifty 50']['returns'][f'M{m_idx}'] = None
                 
-            n500_p, _ = find_closest_date_price(nifty500_prices, m_dt, direction=direction)
+            n500_p, _ = find_closest_date_price(nifty500_prices, eval_dt, direction=direction)
             benchmarks['Nifty 500']['prices'][f'M{m_idx}'] = n500_p
             if n500_p and n500_entry:
                 benchmarks['Nifty 500']['returns'][f'M{m_idx}'] = (n500_p - n500_entry) / n500_entry
@@ -313,7 +303,7 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
     
     headers = [
         "Run Date", "Selected Sectors", "Picks Count", 
-        "Month 1", "Month 2", "Month 3", "Month 4", "Month 5", "Month 6 / Today",
+        "1 Week", "2 Weeks", "3 Weeks", "4 Weeks",
         "Nifty 50", "Nifty 500", "Outperform vs N50", "Outperform vs N500"
     ]
     
@@ -339,9 +329,9 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
         sectors = sorted(list(set([s['Sector'] for s in stocks])))
         sectors_str = ", ".join(sectors)
         
-        # Calc average returns at each month end
+        # Calc average returns at each week end
         avg_rets = []
-        for m_idx in range(1, 7):
+        for m_idx in range(1, 5):
             m_key = f'M{m_idx}'
             rets = [s['Returns'].get(m_key) for s in stocks if s['Returns'].get(m_key) is not None]
             avg_rets.append(safe_mean(rets) if rets else None)
@@ -355,8 +345,8 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
         ws_db.write(row_num, 1, sectors_str, fmt_body)
         ws_db.write(row_num, 2, len(stocks), fmt_body_center)
         
-        # Month 1 - Month 6
-        for m_idx in range(6):
+        # 1 Week - 4 Weeks
+        for m_idx in range(4):
             val = avg_rets[m_idx]
             if val is not None:
                 ws_db.write(row_num, 3 + m_idx, val, fmt_body_pct)
@@ -364,23 +354,23 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
                 ws_db.write(row_num, 3 + m_idx, "—", fmt_body_center)
                 
         # Nifty 50 & Nifty 500 final
-        ws_db.write(row_num, 9, n50_final if n50_final is not None else "—", fmt_body_pct)
-        ws_db.write(row_num, 10, n500_final if n500_final is not None else "—", fmt_body_pct)
+        ws_db.write(row_num, 7, n50_final if n50_final is not None else "—", fmt_body_pct)
+        ws_db.write(row_num, 8, n500_final if n500_final is not None else "—", fmt_body_pct)
         
         # Outperformance
         if portfolio_final is not None and n50_final is not None:
             diff_50 = portfolio_final - n50_final
             fmt = fmt_outperf_pos if diff_50 >= 0 else fmt_outperf_neg
-            ws_db.write(row_num, 11, diff_50, fmt)
+            ws_db.write(row_num, 9, diff_50, fmt)
         else:
-            ws_db.write(row_num, 11, "—", fmt_body_center)
+            ws_db.write(row_num, 9, "—", fmt_body_center)
             
         if portfolio_final is not None and n500_final is not None:
             diff_500 = portfolio_final - n500_final
             fmt = fmt_outperf_pos if diff_500 >= 0 else fmt_outperf_neg
-            ws_db.write(row_num, 12, diff_500, fmt)
+            ws_db.write(row_num, 10, diff_500, fmt)
         else:
-            ws_db.write(row_num, 12, "—", fmt_body_center)
+            ws_db.write(row_num, 10, "—", fmt_body_center)
             
         dashboard_rows.append({
             'picks_count': len(stocks),
@@ -397,23 +387,23 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
     total_picks = sum([x['picks_count'] for x in dashboard_rows])
     ws_db.write(row_num, 2, total_picks / len(dashboard_rows) if dashboard_rows else 0, fmt_bold_label)
     
-    for m_idx in range(6):
+    for m_idx in range(4):
         vals = [x['m_rets'][m_idx] for x in dashboard_rows if x['m_rets'][m_idx] is not None]
         mean_val = safe_mean(vals) if vals else 0
         ws_db.write(row_num, 3 + m_idx, mean_val, fmt_bold_num_pct)
         
     n50_avg = safe_mean([x['n50'] for x in dashboard_rows if x['n50'] is not None])
     n500_avg = safe_mean([x['n500'] for x in dashboard_rows if x['n500'] is not None])
-    ws_db.write(row_num, 9, n50_avg, fmt_bold_num_pct)
-    ws_db.write(row_num, 10, n500_avg, fmt_bold_num_pct)
+    ws_db.write(row_num, 7, n50_avg, fmt_bold_num_pct)
+    ws_db.write(row_num, 8, n500_avg, fmt_bold_num_pct)
     
     # Average Outperformance
-    avg_portfolio_final = safe_mean([x['m_rets'][len(get_monthly_dates(d, today_date)) - 1] for d, x in zip(backtest_dates, dashboard_rows)])
+    avg_portfolio_final = safe_mean([x['m_rets'][len(get_weekly_dates(d, today_date)) - 1] for d, x in zip(backtest_dates, dashboard_rows)])
     diff_n50_avg = avg_portfolio_final - n50_avg
-    ws_db.write(row_num, 11, diff_n50_avg, fmt_outperf_pos if diff_n50_avg >= 0 else fmt_outperf_neg)
+    ws_db.write(row_num, 9, diff_n50_avg, fmt_outperf_pos if diff_n50_avg >= 0 else fmt_outperf_neg)
     
     diff_n500_avg = avg_portfolio_final - n500_avg
-    ws_db.write(row_num, 12, diff_n500_avg, fmt_outperf_pos if diff_n500_avg >= 0 else fmt_outperf_neg)
+    ws_db.write(row_num, 10, diff_n500_avg, fmt_outperf_pos if diff_n500_avg >= 0 else fmt_outperf_neg)
 
     # ── Section: Concentration Portfolio Dashboard (Top N Picks only) ──
     row_num += 3
@@ -439,7 +429,7 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
         sectors_str = ", ".join(sectors)
         
         avg_rets = []
-        for m_idx in range(1, 7):
+        for m_idx in range(1, 5):
             m_key = f'M{m_idx}'
             rets = [s['Returns'].get(m_key) for s in stocks if s['Returns'].get(m_key) is not None]
             avg_rets.append(np.mean(rets) if rets else None)
@@ -452,15 +442,15 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
         ws_db.write(row_num, 1, sectors_str, fmt_body)
         ws_db.write(row_num, 2, len(stocks), fmt_body_center)
         
-        for m_idx in range(6):
+        for m_idx in range(4):
             val = avg_rets[m_idx]
             if val is not None:
                 ws_db.write(row_num, 3 + m_idx, val, fmt_body_pct)
             else:
                 ws_db.write(row_num, 3 + m_idx, "—", fmt_body_center)
                 
-        ws_db.write(row_num, 9, n50_final if n50_final is not None else "—", fmt_body_pct)
-        ws_db.write(row_num, 10, n500_final if n500_final is not None else "—", fmt_body_pct)
+        ws_db.write(row_num, 7, n50_final if n50_final is not None else "—", fmt_body_pct)
+        ws_db.write(row_num, 8, n500_final if n500_final is not None else "—", fmt_body_pct)
         
         if portfolio_final is not None and n50_final is not None:
             diff_50 = portfolio_final - n50_final
@@ -489,22 +479,22 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
     ws_db.write(row_num, 1, f"Concentrated Portfolio (Top {top_n_picks} Picks)", fmt_bold_label)
     ws_db.write(row_num, 2, top_n_picks, fmt_bold_label)
     
-    for m_idx in range(6):
+    for m_idx in range(4):
         vals = [x['m_rets'][m_idx] for x in dashboard_top10_rows if x['m_rets'][m_idx] is not None]
         mean_val = safe_mean(vals) if vals else 0
         ws_db.write(row_num, 3 + m_idx, mean_val, fmt_bold_num_pct)
         
     n50_avg_10 = safe_mean([x['n50'] for x in dashboard_top10_rows if x['n50'] is not None])
     n500_avg_10 = safe_mean([x['n500'] for x in dashboard_top10_rows if x['n500'] is not None])
-    ws_db.write(row_num, 9, n50_avg_10, fmt_bold_num_pct)
-    ws_db.write(row_num, 10, n500_avg_10, fmt_bold_num_pct)
+    ws_db.write(row_num, 7, n50_avg_10, fmt_bold_num_pct)
+    ws_db.write(row_num, 8, n500_avg_10, fmt_bold_num_pct)
     
-    avg_top10_portfolio_final = safe_mean([x['m_rets'][len(get_monthly_dates(d, today_date)) - 1] for d, x in zip(backtest_dates, dashboard_top10_rows)])
+    avg_top10_portfolio_final = safe_mean([x['m_rets'][len(get_weekly_dates(d, today_date)) - 1] for d, x in zip(backtest_dates, dashboard_top10_rows)])
     diff_n50_avg_10 = avg_top10_portfolio_final - n50_avg_10
-    ws_db.write(row_num, 11, diff_n50_avg_10, fmt_outperf_pos if diff_n50_avg_10 >= 0 else fmt_outperf_neg)
+    ws_db.write(row_num, 9, diff_n50_avg_10, fmt_outperf_pos if diff_n50_avg_10 >= 0 else fmt_outperf_neg)
     
     diff_n500_avg_10 = avg_top10_portfolio_final - n500_avg_10
-    ws_db.write(row_num, 12, diff_n500_avg_10, fmt_outperf_pos if diff_n500_avg_10 >= 0 else fmt_outperf_neg)
+    ws_db.write(row_num, 10, diff_n500_avg_10, fmt_outperf_pos if diff_n500_avg_10 >= 0 else fmt_outperf_neg)
 
     # ── Sheets 2-7: Individual Date Backtests ──
     for r_date in backtest_dates:
@@ -543,9 +533,9 @@ def run_performance_tracker(backtest_dates=None, entry_threshold=70.0, top_n_pic
             
         for m_idx, m_dt in enumerate(m_dates, 1):
             offset = 7 + (m_idx - 1) * 3
-            ws.write(2, offset, f"Month {m_idx}\nDate", fmt_header)
-            ws.write(2, offset + 1, f"Month {m_idx}\nPrice", fmt_header)
-            ws.write(2, offset + 2, f"Month {m_idx}\nReturn", fmt_header_green)
+            ws.write(2, offset, f"{m_idx} Week\nDate" if m_idx == 1 else f"{m_idx} Weeks\nDate", fmt_header)
+            ws.write(2, offset + 1, f"{m_idx} Week\nPrice" if m_idx == 1 else f"{m_idx} Weeks\nPrice", fmt_header)
+            ws.write(2, offset + 2, f"{m_idx} Week\nReturn" if m_idx == 1 else f"{m_idx} Weeks\nReturn", fmt_header_green)
             
         r_num = 3
         

@@ -23,10 +23,8 @@ class BacktestDataFetcher(DataFetcher):
         self.as_of_date_str = as_of_date.strftime('%Y-%m-%d')
 
     def get_stock_data(self, symbol: str, days: int = 730) -> pd.DataFrame:
-        """Fetch stock price data directly from MySQL DB cache, fallback to yfinance if empty."""
-        df = self.cache.get_price_data(symbol)
-        if df.empty:
-            df = super().get_stock_data(symbol, days=days)
+        """Fetch stock price data using incremental loading and then filter for backtest date."""
+        df = super().get_stock_data(symbol, days=days)
         if not df.empty:
             df = df[df.index.date <= self.as_of_date]
         return df

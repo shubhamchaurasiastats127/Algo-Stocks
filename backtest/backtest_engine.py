@@ -10,8 +10,9 @@ import pandas as pd
 # pyrefly: ignore [missing-import]
 import yaml
 
-# Allow importing from src directory
+# Allow importing from src and backtest directories
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '../src')))
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 
 # pyrefly: ignore [missing-import]
 from engine import StockAnalysisEngine
@@ -72,6 +73,46 @@ class BacktestStockAnalysisEngine(StockAnalysisEngine):
         df_union = pd.DataFrame(all_union_results)
         df_union = self._deduplicate_union(df_union)
         
+        # Initialize default L3 columns in case filter is skipped
+        df_union['Macro_Sentiment_Multiplier'] = 0.0
+        df_union['Systemic_Risk_Off'] = False
+        df_union['Combined_Score'] = df_union['Final_Rank_Score']
+        df_union['Base_Rank_Score'] = df_union['Final_Rank_Score']
+        
+        # ---- Step 2.5: Apply Layer 3 Macro Sentiment Filter ----
+        try:
+            from macro_sentiment_filter import MacroSentimentEngine
+            print(f"[{self.as_of_date}] Applying Layer 3 Macro Sentiment Filter...")
+            mse = MacroSentimentEngine()
+            
+            # Map columns for filter input
+            df_for_filter = df_union.copy()
+            df_for_filter['Ticker'] = df_for_filter['Symbol']
+            df_for_filter['Sector'] = df_for_filter['Index_Name']
+            df_for_filter['Base_Score'] = df_for_filter['Final_Rank_Score']
+            
+            df_filtered_l3 = mse.apply_filter(df_for_filter, top_n=len(df_for_filter), as_of_date=self.as_of_date)
+            
+            if not df_filtered_l3.empty:
+                # Merge the L3 filter scores back into the original df_union columns
+                df_filtered_l3 = df_filtered_l3.rename(columns={'Ticker': 'Symbol'})
+                df_union_base = df_union.drop(columns=['Macro_Sentiment_Multiplier', 'Systemic_Risk_Off', 'Combined_Score', 'Base_Rank_Score'])
+                df_union = df_union_base.merge(
+                    df_filtered_l3[['Symbol', 'Macro_Sentiment_Multiplier', 'Systemic_Risk_Off', 'Combined_Score']], 
+                    on='Symbol', 
+                    how='inner'
+                )
+                # Keep track of original score
+                df_union['Base_Rank_Score'] = df_union['Final_Rank_Score']
+                # Update Final_Rank_Score to be Combined_Score
+                df_union['Final_Rank_Score'] = df_union['Combined_Score']
+                # Sort by new Final_Rank_Score descending
+                df_union = df_union.sort_values('Final_Rank_Score', ascending=False).reset_index(drop=True)
+            else:
+                print(f"[{self.as_of_date}] Warning: Layer 3 filter returned empty results. Keeping unfiltered results.")
+        except Exception as e:
+            print(f"[{self.as_of_date}] Error running Layer 3 Macro Sentiment filter: {e}. Skipping filter.")
+            
         # Validate results
         self._validate_results(df_union)
 

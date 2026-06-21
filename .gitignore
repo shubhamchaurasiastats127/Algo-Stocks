@@ -12,7 +12,7 @@ __pycache__/
 # Local sqlite caches & system logs
 logs/
 *.log
-data/*.db
+# data/*.db (commented out to track SQLite cache for deployment)
 
 # Scratch and temp files
 scratch/

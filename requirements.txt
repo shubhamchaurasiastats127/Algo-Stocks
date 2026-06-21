@@ -9,3 +9,5 @@ streamlit
 plotly
 scikit-learn
 xlsxwriter
+pytrends
+
